@@ -9,7 +9,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     uvicorn[standard]==0.34.3 \
     pydantic \
     python-dotenv \
-    openai
+    openai \
+    httpx
 
 # 不复制源代码，使用volumes挂载支持热更新
 # CMD ["python", "start_proxy.py"]

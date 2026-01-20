@@ -4,7 +4,7 @@ services:
   proxy:
     build:
       context: .
-      dockerfile: Dockerfile.no-compile
+      dockerfile: Dockerfile
     ports:
       - 8082:8082
     volumes:
@@ -17,6 +17,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - FASTAPI_RELOAD=true  # 启用FastAPI热重载
+      # macOS Docker: 使用 host.docker.internal 访问宿主机服务
+      - OPENAI_BASE_URL=http://host.docker.internal:18063
     restart: unless-stopped
     # 开发模式的高级配置
     labels:

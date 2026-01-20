@@ -2,7 +2,7 @@ services:
   proxy:
     build:
       context: .
-      dockerfile: Dockerfile.no-compile  # 使用不需要编译的Dockerfile
+      dockerfile: Dockerfile  # 使用不需要编译的Dockerfile
     ports:
       - 8082:8082
     volumes:
@@ -11,6 +11,8 @@ services:
       - ./.env:/app/.env  # 挂载配置文件
     environment:
       - PYTHONUNBUFFERED=1  # 确保日志实时输出
+      # macOS Docker: 使用 host.docker.internal 访问宿主机服务
+      - OPENAI_BASE_URL=http://host.docker.internal:18063
     # 开发模式：重启策略
     restart: unless-stopped
     # 健康检查
