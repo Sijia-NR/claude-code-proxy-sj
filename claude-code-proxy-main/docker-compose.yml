@@ -1,0 +1,21 @@
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.no-compile  # 使用不需要编译的Dockerfile
+    ports:
+      - 8082:8082
+    volumes:
+      - ./src:/app/src  # 挂载源代码，支持热更新
+      - ./start_proxy.py:/app/start_proxy.py  # 挂载启动脚本
+      - ./.env:/app/.env  # 挂载配置文件
+    environment:
+      - PYTHONUNBUFFERED=1  # 确保日志实时输出
+    # 开发模式：重启策略
+    restart: unless-stopped
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

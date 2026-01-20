@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.no-compile
+    ports:
+      - 8082:8082
+    volumes:
+      # 挂载所有代码文件，支持热更新
+      - .:/app
+      # 排除venv等不需要挂载的目录
+      - /app/.venv
+      - /app/__pycache__
+      - /app/*.pyc
+    environment:
+      - PYTHONUNBUFFERED=1
+      - FASTAPI_RELOAD=true  # 启用FastAPI热重载
+    restart: unless-stopped
+    # 开发模式的高级配置
+    labels:
+      - "com.docker.compose.project=claude-proxy-dev"
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

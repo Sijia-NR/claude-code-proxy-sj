@@ -1,0 +1,410 @@
+大模型智能应用服务接口规范
+
+一、调用规则
+业务应用通过人工智能平台调用模型、智能体、应用反馈接口时，需操作以下事项：
+（一）调用模型
+（1）基于已通过的业务应用，授权要调用的模型，审核通过后可获得：模型ID、模型版本字段。
+（2）调用语义、视觉、多模态接口时，在请求头中传入Authorization（应用注册后获取到的密钥）字段，在Body中传入model（授权通过后获取到的模型ID）进行调用。
+（3）调用后将返回appId（应用ID）、globalTraceId（全链路ID）、content（模型输出内容），此字段将用于在后续调用应用反馈接口中的必传字段。
+二、调用要求
+（一）请求结构
+1．请求协议
+人工智能平台大模型接口遵循 HTTP 协议，支持HTTP/HTTPS。
+2．字符编码
+人工智能平台大模型接口均使用 UTF-8 编码。
+（二）公共头
+1．公共请求头
+参数名	描述	是否必填	示例
+Content-Type	application/json;charset=utf-8 通用数据交互格式（默认）
+multipart/form-data;charset=utf-8 支持图片、文件等上传，以及语音二进制流传输。
+text/event-stream;charset=utf-8 支持服务端向客户端推送服务、事件和消息通知的数据格式。	是	application/json;charset=utf-8
+multipart/form-data;charset=utf-8
+text/event-stream;charset=utf-8
+Authorization	请求签名app_key	是	APP_KEY
+
+2．公共响应头
+参数名	描述
+Content-Type	application/json;charset=utf-8
+text/event-stream;charset=utf-8
+
+（三）数据格式说明
+数据类型	描述
+String	字符串类型
+Array[]	在Python中表示列表，在Java中表示ArrayList.等
+Integer	表示整数型
+Float	浮点型
+Boolean	布尔型
+Object	JSON对象
+
+（四）错误返回码说明
+错误码	描述
+000000	成功
+100000	失败
+200001	请求参数不是标准的JSON格式
+200002	请求参数错误
+200003	必填字段为空
+200004	参数长度超过限制
+200005	参数枚举值无效
+300001	鉴权失败
+300002	权限被拒绝
+400001	服务器内部错误
+400002	远程服务调用失败
+
+四、调用规范
+（一）模型服务接口定义
+1．语义大模型服务接口
+（1）接口文档
+接口地址	http://IP:Port/lmp-cloud-ias-server/api/llm/chat/completions/或
+http://IP:Port/lmp-cloud-ias-server/api/llm/chat/completions/V2
+接口规范	http+json
+接口说明	发起一次语义模型对话请求
+支持调用原接口与/V2版本接口：（1）调用原有接口时，流式输出有event:data事件类型；（2）调用V2版本接口时，流式输出是没有event:data事件类型；
+接口请求头	Authorization: APP_KEY
+请求方式	POST
+输入参数	参数名称	类型	是否必填	备注
+	messages	Array[]	是	用户与模型的对话历史。array中的每个元素形式为{"role":角色, "content": 内容}。角色当前可选值：system、user、assistant，其中，仅messages[0]中支持role为system，一般情况下，user和assistant需要交替出现，且messages中最后一个元素的role必须为user。
+	model	String	是	要使用的模型的 ID。
+	modelVersion	String	否	调用的模型版本号
+	stream	Boolean	否	是否以流式接口的形式返回数据，默认false
+	temperature	Float	否	较高的数值会使输出更加随机，而较低的数值会使其更加集中和确定。说明：
+（1）默认0.95
+（2）范围 (0, 1.0]，不能为0
+	top_p	Float	否	影响输出文本的多样性，取值越大，生成文本的多样性越强。
+（1）默认0.7
+（2）取值范围 [0, 1.0]
+	presence_penalty	Float	否	用户控制模型生成时整个序列中的重复度。提高presence_penalty时可以降低模型生成的重复度，取值范围[-2.0, 2.0]。
+	tools	Array[Object]	否	模型可能会调用的工具列表。目前，仅支持 function 类型的工具。使用此参数来提供function列表。
+	tool_choice	String / Object	否	选择模型调用工具的方式。如果您希望模型不调用任何工具直接生成一条消息，则设置为none；如果您希望由大模型进行工具策略的选择，则设置为auto；如果您要求大模型必须进行工具调用，则可以设置为required，若想强制模型调用某工具，可 按如下格式设置参数： {"type": "function", "function": {"name": "my_function"}} 。未设置tools时，默认值为 none；设置了tools时，默认值为auto。
+	parallel_tool_calls	Boolean	否	表示是否开启并行工具调用。参数为true时开启，为false时不开启。默认值为 false。
+	max_tokens	Integer	否	模型可生成的最大token个数，根据模型不同有不同的上限限制。
+返回参数	globalTraceId	String		平台全链路ID
+	id	String		本次请求的唯一标识，可用于排查问题
+	appId	String		业务应用ID
+	object	String		非流式为chat.completion，流式为chat.completion.chunk
+	created	Integer		聊天完成创建时的 Unix 时间戳（以秒为单位）。
+	choices	Object		聊天返回结果列表。
+	usage	Object		token统计信息，包含promot_tokens和completion_tokens和total_tokens
+
+表1-1 输入参数messages对象
+参数名	字段类型	描述
+role	String	当前支持以下：
+system: 表示系统人设
+user: 表示用户
+assistant: 表示对话助手
+content	String	对话内容，不能为空
+
+表1-2 输入参数tools对象
+参数名	字段类型	是否必填	描述
+type	String	是	tools的类型，目前仅支持function。
+function	Object	是	function工具详情
+
+表1-2.1 输入参数tools.function对象
+参数名	字段类型	是否必填	描述
+type	String	是	function名称
+description	String	是	function描述
+parameters	Object	是	function输入参数，以 JSON Schema 对象描述。可参考接口示例。如果parameters参数为空，表示function没有入参。
+
+表1-3 输入参数tool_choice对象
+参数名	字段类型	是否必填	描述
+type	String	是	tool的类型，目前仅支持function。
+function	Object	是	必选的function名称对象
+
+表1-3.1 输入参数tool_choice.function对象
+参数名	字段类型	是否必填	描述
+name	String	是	必选的function名称
+
+表1-4 同步响应中返回参数的choices对象说明
+参数名	字段类型	描述
+finish_reason	String	模型停止生成标记的原因。
+·stop: 因触发输入参数中的stop条件，或自然停止输出而结束
+·length: 因生成长度过长结束
+·tool_calls: 因需要调用工具而结束
+index	Integer	choices中的索引
+message	Object	模型生成的聊天消息
+
+表1-4.1 同步响应中返回参数中choices对象的message说明
+参数名	字段类型	描述
+content	String	消息的内容
+role	String	此消息作者的角色。
+tool_calls	Array[Object]	发起 Function Calling后，模型生成的 function调用信息，包括要调用的工具以及调用工具所需的参数。
+
+表1-4.1.1同步响应中返回参数中choices.message.tool_calls对象
+参数名	字段类型	描述
+id	String	tool的 ID
+type	String	tool的类型，目前仅支持function。
+function	Object	调用的 function 信息
+
+表1-4.1.1.1 同步响应中返回参数中choices.message.tool_calls.function 对象
+参数名	字段类型	描述
+name	String	调用的function名称
+arguments	String	调用的function输入参数，格式为 JSON。注意，大模型响应有一定随机性，并不总是生成有效的 JSON，在调用函数之前，建议在代码中验证这些参数。
+
+表1-5 流式响应中返回参数的choices对象说明。
+参数名	字段类型	描述
+finish_reason	String / null	模型生成标记。
+·null: 生成未结束
+
+·stop: 因触发输入参数中的stop条件，或自然停止输出而结束
+·length: 因生成长度过长结束
+·tool_calls: 因需要调用工具而结束
+index	Integer	choices中的索引
+delta	Object	流式模型响应生成的聊天完成增量。
+
+表1-5.1 流式响应中返回参数中choices对象的delta说明。
+参数名	字段类型	描述
+content	String	消息的内容
+role	String	此消息作者的角色。
+tool_calls	Array[Object]	发起 Function Calling后，模型生成的 function调用信息，包括要调用的工具以及调用工具所需的参数。
+
+表1-5.1.1 流式响应中返回参数中choices.delta.tool_calls对象
+参数名	字段类型	描述
+index	Integer	tool在tool_calls列表中的索引
+id	String	tool的 ID
+type	String	tool的类型，目前仅支持function。
+function	Object	调用的 function 信息
+
+表1-5.1.1.1流式响应中返回参数中choices.delta.tool_calls.function 对象
+参数名	字段类型	描述
+name	String	调用的function名称
+arguments	String	调用的function输入参数，所有chunk的arguments拼接后为完整的JSON字符串。注意，大模型响应有一定随机性，并不总是生成有效的 JSON，在调用函数之前，建议在代码中验证这些参数。
+
+表1-6 返回参数中usage对象说明
+参数名	字段类型	描述
+prompt_tokens	Integer	问题tokens数
+completion_tokens	Integer	回答tokens数
+total_tokens	Integer	tokens总数
+
+
+（2）请求示例
+请求示例	{
+    "model": "xxxxxx",
+    "messages": [
+        {
+            "role": "user",
+            "content": "你好，介绍下南京"
+        }
+    ],
+    "stream": false,
+    "temperature": 0.95,
+    "top_p": 0.7,
+    "presence_penalty": 1,
+    "modelVersion": ""
+}
+成功响应示例
+(非流式)	{
+    "id": "125b60cb-deb5-4686-a1a9-216c950d1b07",
+    "appId": "564866165928038400",
+    "globalTraceId": "d2fb7462-c969-4263-90b8-34919c4280eb",
+    "object": "chat.completion",
+    "created": 0,
+    "choices": [
+        {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "敏感词过滤",
+                "isSensitiveWord": true
+            }
+        }
+    ],
+    "usage": null
+}
+失败响应示例	{
+"code": "100000",
+"success":"false"
+    "message": "失败！错误原因：XXX",
+    "data": 
+    {
+        "traceId": "xxx",
+        "appId": "564866165928038400",
+        "globalTraceId": "75940413-8c86-4d75-9713-b2db0f74bc91",
+        "answer": null,
+        "messageId": null,
+        "isEnd ": null
+    }
+}
+
+2．视觉大模型服务接口
+（1）接口文档
+视觉大模型接口为平台网关透传接口，入参中的model字段为必传字段以外，其余字段可直接使用模型的相关接口。
+接口地址	http://IP:Port/lmp-cloud-ias-server/api/lvm/completions/
+接口规范	http+json
+接口说明	发起一次视觉大模型识别请求。可以以图像作为输入，并以检测框作为输出。
+接口出入参以模型自身的接口为主，平台只提供了转发的入口。
+接口请求头	Authorization: APP_KEY
+请求方式	POST
+输入参数	参数名称	类型	是否必填	备注
+	data	Array[]	是	用户传入的图片列表
+	model	String	是	要使用的模型的 ID。
+	modelVersion	String	否	调用的模型版本号
+	traceId	String		本次请求的唯一标识，可用于排查问题
+	success	Boolean		本次请求是否成功
+	data	Array[]		对话返回结果
+
+表2-1输入参数的data对象说明
+参数名	字段类型	是否必填	描述
+image_name	String	是	图片文件名
+image_type	String	是	url或base64
+image_data	String	是	·图片的 url链接（http/https协议，无鉴权）；
+·图片Base64编码：遵循格式data:image/<图片格式>;base64,<Base64编码>。
+图片格式目前支持：jpg, jpeg和png。
+
+表2-2 返回参数的data对象说明
+参数名	字段类型	描述
+image_name	String	图片文件名
+image_height	Integer	图像高度
+image_width	Integer	图像宽度
+infer_results	Array[]	推理结果
+
+表2-2.1返回参数中data对象的infer_results说明
+参数名	字段类型	描述
+bbox	Array[]	目标外接矩形框位置
+category	String	目标类别
+score	Float	目标置信度
+
+（2）请求示例
+针对视觉大模型为网关透传接口，整体的出入参已模型实际的出入参为主。
+
+3．多模态大模型服务接口
+（1）接口文档
+接口地址	http://IP:Port/lmp-cloud-ias-server/api/vlm/chat/completions/或
+http://IP:Port/lmp-cloud-ias-server/api/vlm/chat/completions/V2
+接口规范	http+json
+接口说明	发起一次多模态大模型对话请求，可以以图像、文本作为输入，并以文本作为输出，支持中文多模态对话。目前不支持多图输入，传入多张图片，默认选择第一张；
+支持调用原接口与/V2版本接口：（1）调用原有接口时，流式输出有event:data事件类型；（2）调用V2版本接口时，流式输出是没有event:data事件类型；
+接口请求头	Authorization: APP_KEY
+请求方式	POST
+输入参数	参数名称	类型	是否必填	备注
+	messages	Array[]	是	用户与模型的对话历史。array中的每个元素形式为{"role":角色, "content": 内容}。角色当前可选值：system、user、assistant，其中，仅messages[0]中支持role为system，一般情况下，user和assistant需要交替出现，且messages中最后一个元素的role必须为user。
+	model	String	是	要使用的模型的ID。
+	modelVersion	String	否	调用的模型版本号
+	stream	Boolean	否	是否以流式接口的形式返回数据，默认false
+	temperature	Float	否	较高的数值会使输出更加随机，而较低的数值会使其更加集中和确定。说明：
+（1）默认0.9
+（2）范围 (0, 2)，不能为0
+	top_p	Float	否	影响输出文本的多样性，取值越大，生成文本的多样性越强。
+（1）默认0.8
+（2）取值范围 (0, 1.0)
+	presence_penalty	Float	否	用户控制模型生成时整个序列中的重复度。提高presence_penalty时可以降低模型生成的重复度，取值范围[-2.0, 2.0]。
+	max_tokens	Integer	否	模型可生成的最大token个数，根据模型不同有不同的上限限制。
+返回参数	globalTraceId	String		平台全链路ID
+	id	String		本次请求的唯一标识，可用于排查问题
+	appId	String		业务应用ID
+	object	String		始终是chat.completion
+	created	Integer		聊天完成创建时的 Unix 时间戳（以秒为单位）。
+	choices	Object		聊天返回结果列表。
+
+表3-1 输入参数中的messages对象描述。
+参数名	字段类型	是否必填	描述
+role	String	是	当前支持以下：
+system: 表示系统人设
+user: 表示用户
+assistant: 表示对话助手
+content	Array[]	是	对话内容，不能为空
+
+表3-1.1 输入参数中messages对象中的content对象说明
+参数名	字段类型	是否必填	描述
+type	String	是	对话内容格式：
+text: 文本
+image_url: 图片url
+image_base64：图片base64编码
+text	String	否	type为text时输入对话文本内容
+image	String	否	type为image_base64时输入对话图片的base64编码，请遵循格式data:image/<图片格式>;base64,<Base64编码>。
+图片格式支持：jpg, jpeg和png。
+
+表3-2 同步响应中返回参数的choices对象说明
+参数名	字段类型	描述
+finish_reason	String	模型停止生成标记的原因。
+·stop: 模型生成正常结束
+index	Integer	choices中的索引
+message	Object	模型生成的聊天消息
+
+表3-2.1 同步响应中返回参数中choices对象的message说明
+参数名	字段类型	描述
+content	String	消息的内容
+role	String	此消息作者的角色。
+isSensitiveWord	boolean	是否涉及敏感词
+
+表3-3 流式响应中返回参数的choices对象说明
+参数名	字段类型	描述
+finish_reason	String	模型停止生成标记的原因。
+·stop: 模型生成正常结束
+index	Integer	choices中的索引
+delta	Object	流式模型响应生成的聊天完成增量。
+
+表3-3.1 流式响应中返回参数中choices对象的delta说明
+参数名	字段类型	描述
+content	String	消息的内容
+role	String	此消息作者的角色。
+isSensitiveWord	boolean	是否涉及敏感词
+
+（2）请求示例
+请求示例	{
+    "model": "SGGM-VL-7B",
+    "messages": [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "图片是什么？"
+                },
+                {
+                    "type": "image_base64",
+                    "image": "data:image/jpeg;base64,xxxxxx/xxxxx/xxx"
+                }
+            ]
+        }
+    ],
+    "stream": true,
+    "temperature": 0.9,
+    "top_p": 0.8,
+    "presence_penalty": 1,
+    "modelVersion": ""
+}
+成功响应示例
+(非流式)	{
+    "id": "d2fb7462-c969-4263-90b8-34919c4280eb",
+    "appId": "564866165928038400",
+    "globalTraceId": "d2fb7462-c969-4263-90b8-34919c4280eb",
+    "object": "chat.completion",
+    "created": 1763689089,
+    "choices": [
+        {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "xxxxxxxxx。",
+                "isSensitiveWord": false
+            }
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 668,
+        "completion_tokens": 47,
+        "total_tokens": 715
+    }
+}
+成功响应示例
+(流式)	data:{"id":"94e4bbac-e0bc-4408-aab2-48b5fffc4e3b","appId":"564866165928038400","globalTraceId":"94e4bbac-e0bc-4408-aab2-48b5fffc4e3b","object":"chat.completion.chunk","created":1763541616,"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":"","isSensitiveWord":false}}],"usage":null}
+
+data:{"id":"94e4bbac-e0bc-4408-aab2-48b5fffc4e3b","appId":"564866165928038400","globalTraceId":"94e4bbac-e0bc-4408-aab2-48b5fffc4e3b","object":"chat.completion.chunk","created":1763541616,"choices":[{"finish_reason":null,"index":0,"delta":{"role":null,"content":"这","isSensitiveWord":false}}],"usage":null}
+ 
+data:{"id":"94e4bbac-e0bc-4408-aab2-48b5fffc4e3b","appId":"564866165928038400","globalTraceId":"94e4bbac-e0bc-4408-aab2-48b5fffc4e3b","object":"chat.completion.chunk","created":1763541616,"choices":[{"finish_reason":null,"index":0,"delta":{"role":null,"content":"耶","isSensitiveWord":false}}],"usage":null}
+
+data:{"id":"94e4bbac-e0bc-4408-aab2-48b5fffc4e3b","appId":"564866165928038400","globalTraceId":"94e4bbac-e0bc-4408-aab2-48b5fffc4e3b","object":"chat.completion.chunk","created":1763541616,"choices":[{"finish_reason":null,"index":0,"delta":{"role":null,"content":"犬","isSensitiveWord":false}}],"usage":null}
+失败响应示例	{
+"code": "100000",
+"success":"false"
+    "message": "失败！错误原因：XXX",
+    "data": 
+    {
+        "traceId": "xxx",
+        "answer": null,
+        "messageId": null,
+        "isEnd ": null
+    }
+}
+
