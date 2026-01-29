@@ -3,9 +3,12 @@ import json
 from fastapi import HTTPException
 from typing import Optional, AsyncGenerator, Dict, Any
 import httpx
+import logging
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from openai._exceptions import APIError, RateLimitError, AuthenticationError, BadRequestError
+
+logger = logging.getLogger(__name__)
 
 class OpenAIClient:
     """Async OpenAI client with cancellation support."""
@@ -67,6 +70,11 @@ class OpenAIClient:
             self.active_requests[request_id] = cancel_event
 
         try:
+            # Log OpenAI request (non-LMP mode)
+            logger.info(f"📤 [UPSTREAM REQUEST] Sending to OpenAI-compatible API")
+            logger.info(f"🌐 Base URL: {self.base_url}")
+            logger.info(f"📦 Upstream Request Body: {json.dumps(request, indent=2, ensure_ascii=False)}")
+
             # Create task that can be cancelled
             completion_task = asyncio.create_task(
                 self.client.chat.completions.create(**request)
@@ -98,7 +106,10 @@ class OpenAIClient:
                 completion = await completion_task
 
             # Convert to dict format that matches the original interface
-            return completion.model_dump()
+            result = completion.model_dump()
+            logger.info(f"✅ [UPSTREAM SUCCESS] OpenAI API returned response")
+            logger.info(f"📦 Upstream Response Body: {json.dumps(result, indent=2, ensure_ascii=False)}")
+            return result
 
         except AuthenticationError as e:
             raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e)))
@@ -131,6 +142,12 @@ class OpenAIClient:
             "Authorization": self.api_key,  # LMP uses APP_KEY directly
             **self.custom_headers
         }
+
+        # Log upstream request details
+        logger.info(f"📤 [UPSTREAM REQUEST] Sending to LMP API")
+        logger.info(f"🌐 URL: {url}")
+        logger.info(f"📋 Upstream Headers: {json.dumps({k: v if k.lower() != 'authorization' else '***HIDDEN***' for k, v in headers.items()}, indent=2, ensure_ascii=False)}")
+        logger.info(f"📦 Upstream Request Body: {json.dumps(request, indent=2, ensure_ascii=False)}")
 
         # Create cancellation token if request_id provided
         if request_id:
@@ -169,16 +186,23 @@ class OpenAIClient:
                     response = await client.post(url, json=request, headers=headers)
 
                 if response.status_code != 200:
+                    logger.error(f"❌ [UPSTREAM ERROR] LMP API returned error status: {response.status_code}")
                     try:
                         error_data = response.json()
+                        logger.error(f"📦 Error Response Body: {json.dumps(error_data, indent=2, ensure_ascii=False)}")
                     except:
                         error_data = {}
+                        logger.error(f"📦 Error Response Text: {response.text}")
                     # Check for LMP error format
                     if "code" in error_data or isinstance(error_data, dict):
                         raise HTTPException(status_code=response.status_code, detail=error_data)
                     raise HTTPException(status_code=response.status_code, detail=response.text)
 
-                return response.json()
+                # Log successful response
+                response_data = response.json()
+                logger.info(f"✅ [UPSTREAM SUCCESS] LMP API returned status: {response.status_code}")
+                logger.info(f"📦 Upstream Response Body: {json.dumps(response_data, indent=2, ensure_ascii=False)}")
+                return response_data
 
         except httpx.HTTPStatusError as e:
             raise HTTPException(status_code=e.response.status_code, detail=self.classify_openai_error(e.response.text))
@@ -214,13 +238,24 @@ class OpenAIClient:
             request["stream_options"]["include_usage"] = True
 
             # Create the streaming completion
+            logger.info(f"📤 [UPSTREAM STREAMING REQUEST] Sending to OpenAI-compatible API")
+            logger.info(f"🌐 Base URL: {self.base_url}")
+            logger.info(f"📦 Upstream Request Body: {json.dumps(request, indent=2, ensure_ascii=False)}")
+            logger.info(f"🌊 [STREAMING] Starting to receive streaming chunks...")
+
             streaming_completion = await self.client.chat.completions.create(**request)
 
+            chunk_count = 0
             async for chunk in streaming_completion:
                 # Check for cancellation before yielding each chunk
                 if request_id and request_id in self.active_requests:
                     if self.active_requests[request_id].is_set():
                         raise HTTPException(status_code=499, detail="Request cancelled by client")
+
+                chunk_count += 1
+                # Log every 50th chunk
+                if chunk_count % 50 == 0:
+                    logger.debug(f"🌊 [STREAMING] Received chunk #{chunk_count}")
 
                 # Convert chunk to SSE format
                 chunk_dict = chunk.model_dump()
@@ -228,6 +263,7 @@ class OpenAIClient:
                 yield f"data: {chunk_json}"
 
             # Signal end of stream
+            logger.info(f"✅ [STREAMING COMPLETED] Total chunks received: {chunk_count}")
             yield "data: [DONE]"
 
         except AuthenticationError as e:
@@ -265,6 +301,13 @@ class OpenAIClient:
         # Ensure stream is enabled
         request["stream"] = True
 
+        # Log upstream request details for streaming
+        logger.info(f"📤 [UPSTREAM STREAMING REQUEST] Sending to LMP API")
+        logger.info(f"🌐 URL: {url}")
+        logger.info(f"📋 Upstream Headers: {json.dumps({k: v if k.lower() != 'authorization' else '***HIDDEN***' for k, v in headers.items()}, indent=2, ensure_ascii=False)}")
+        logger.info(f"📦 Upstream Request Body: {json.dumps(request, indent=2, ensure_ascii=False)}")
+        logger.info(f"🌊 [STREAMING] Starting to receive streaming chunks...")
+
         # Create cancellation token if request_id provided
         if request_id:
             cancel_event = asyncio.Event()
@@ -301,10 +344,15 @@ class OpenAIClient:
 
                 if response.status_code != 200:
                     content = await response.aread()
+                    logger.error(f"❌ [UPSTREAM STREAMING ERROR] LMP API returned error status: {response.status_code}")
+                    logger.error(f"📦 Error Response: {content.decode()}")
                     raise HTTPException(status_code=response.status_code, detail=content.decode())
+
+                logger.info(f"✅ [STREAMING STARTED] Connection established, receiving chunks...")
 
                 # Process streaming response
                 is_v2 = self.lmp_api_version == "V2"
+                chunk_count = 0
                 async for line in response.aiter_lines():
                     if not line.strip():
                         continue
@@ -313,6 +361,11 @@ class OpenAIClient:
                     if request_id and request_id in self.active_requests:
                         if self.active_requests[request_id].is_set():
                             raise HTTPException(status_code=499, detail="Request cancelled by client")
+
+                    chunk_count += 1
+                    # Log every 50th chunk to avoid spam
+                    if chunk_count % 50 == 0:
+                        logger.debug(f"🌊 [STREAMING] Received chunk #{chunk_count}: {line[:100]}...")
 
                     # V2 format: no "data:" prefix, just raw JSON
                     # V1 format: standard SSE with "data:" prefix
@@ -326,6 +379,7 @@ class OpenAIClient:
                             yield f"data: {line}"
 
                 # Signal end of stream
+                logger.info(f"✅ [STREAMING COMPLETED] Total chunks received: {chunk_count}")
                 if is_v2:
                     yield "[DONE]"
                 else:

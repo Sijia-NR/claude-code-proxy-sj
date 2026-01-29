@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, Header, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime
 import uuid
+import json
 from typing import Optional
 
 from src.core.config import config
@@ -55,15 +56,23 @@ async def validate_api_key(x_api_key: Optional[str] = Header(None), authorizatio
 @router.post("/v1/messages")
 async def create_message(request: ClaudeMessagesRequest, http_request: Request, _: None = Depends(validate_api_key)):
     try:
-        logger.debug(
-            f"Processing Claude request: model={request.model}, stream={request.stream}"
-        )
+        # Log incoming request headers
+        headers_dict = dict(http_request.headers)
+        logger.info("=" * 80)
+        logger.info("📥 [INCOMING REQUEST] Claude API Request Received")
+        logger.info("=" * 80)
+        logger.info(f"📋 Request Headers: {json.dumps(headers_dict, indent=2, ensure_ascii=False)}")
+        logger.info(f"📦 Request Body (Claude format): {json.dumps(request.model_dump(exclude_unset=True), indent=2, ensure_ascii=False)}")
+        logger.debug(f"Processing Claude request: model={request.model}, stream={request.stream}")
 
         # Generate unique request ID for cancellation tracking
         request_id = str(uuid.uuid4())
+        logger.info(f"🆔 Request ID: {request_id}")
 
         # Convert Claude request to OpenAI format
         openai_request = convert_claude_to_openai(request, model_manager, config.api_provider)
+        logger.info(f"🔄 [CONVERTED] OpenAI Format Request:")
+        logger.info(f"📦 Converted Request Body: {json.dumps(openai_request, indent=2, ensure_ascii=False)}")
 
         # Check if client disconnected before processing
         if await http_request.is_disconnected():
@@ -108,12 +117,18 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
                 return JSONResponse(status_code=e.status_code, content=error_response)
         else:
             # Non-streaming response
+            logger.info("📤 [NON-STREAMING] Sending request to upstream API...")
             openai_response = await openai_client.create_chat_completion(
                 openai_request, request_id
             )
+            logger.info(f"📥 [UPSTREAM RESPONSE] Response received from upstream API:")
+            logger.info(f"📦 Upstream Response Body: {json.dumps(openai_response, indent=2, ensure_ascii=False)}")
             claude_response = convert_openai_to_claude_response(
                 openai_response, request, config.api_provider
             )
+            logger.info(f"🔄 [CONVERTED BACK] Claude Format Response:")
+            logger.info(f"📦 Final Response Body: {json.dumps(claude_response, indent=2, ensure_ascii=False)}")
+            logger.info("=" * 80)
             return claude_response
     except HTTPException:
         raise
