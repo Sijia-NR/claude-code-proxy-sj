@@ -1,126 +1,288 @@
-# Claude Code: Best Practices for Effective Collaboration
+# CLAUDE.md
 
-This document outlines best practices for working with Claude Code to ensure efficient and successful software development tasks.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Task Management
+## Project Overview
 
-For complex or multi-step tasks, Claude Code will use:
-*   **TodoWrite**: To create a structured task list, breaking down the work into manageable steps. This provides clarity on the plan and allows for tracking progress.
-*   **TodoRead**: To review the current list of tasks and their status, ensuring alignment and that all objectives are being addressed.
+This is a **FastAPI-based HTTP API proxy server** that translates between Claude's Anthropic API format and OpenAI's API format. It enables Claude Code to work with any OpenAI-compatible LLM provider (OpenAI, Azure OpenAI, Ollama, etc.).
 
-## File Handling and Reading
+**Core Functionality:**
+- Receives requests in Claude API format (`/v1/messages`)
+- Converts to OpenAI format
+- Forwards to configured LLM provider
+- Converts responses back to Claude format
+- Supports streaming, tool calling, and multimodal inputs
 
-Understanding file content is crucial before making modifications.
+## Development Commands
 
-1.  **Targeted Information Retrieval**:
-    *   When searching for specific content, patterns, or definitions within a codebase, prefer using search tools like `Grep` or `Task` (with a focused search prompt). This is more efficient than reading entire files.
+### Environment Setup
 
-2.  **Reading File Content**:
-    *   **Small to Medium Files**: For files where full context is needed or that are not excessively large, the `Read` tool can be used to retrieve the entire content.
-    *   **Large File Strategy**:
-        1.  **Assess Size**: Before reading a potentially large file, its size should be determined (e.g., using `ls -l` via the `Bash` tool or by an initial `Read` with a small `limit` to observe if content is truncated).
-        2.  **Chunked Reading**: If a file is large (e.g., over a few thousand lines), it should be read in manageable chunks (e.g., 1000-2000 lines at a time) using the `offset` and `limit` parameters of the `Read` tool. This ensures all content can be processed without issues.
-    *   Always ensure that the file path provided to `Read` is absolute.
+```bash
+# Install dependencies (recommended)
+uv sync
 
-## File Editing
+# Or using pip
+pip install -r requirements.txt
 
-Precision is key for successful file edits. The following strategies lead to reliable modifications:
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your API keys and configuration
+```
 
-1.  **Pre-Edit Read**: **Always** use the `Read` tool to fetch the content of the file *immediately before* attempting any `Edit` or `MultiEdit` operation. This ensures modifications are based on the absolute latest version of the file.
+### Running the Server
 
-2.  **Constructing `old_string` (The text to be replaced)**:
-    *   **Exact Match**: The `old_string` must be an *exact* character-for-character match of the segment in the file you intend to replace. This includes all whitespace (spaces, tabs, newlines) and special characters.
-    *   **No Read Artifacts**: Crucially, do *not* include any formatting artifacts from the `Read` tool's output (e.g., `cat -n` style line numbers or display-only leading tabs) in the `old_string`. It must only contain the literal characters as they exist in the raw file.
-    *   **Sufficient Context & Uniqueness**: Provide enough context (surrounding lines) in `old_string` to make it uniquely identifiable at the intended edit location. The "Anchor on a Known Good Line" strategy is preferred: `old_string` is a larger, unique block of text surrounding the change or insertion point. This is highly reliable.
+```bash
+# Direct run (development)
+python start_proxy.py
 
-3.  **Constructing `new_string` (The replacement text)**:
-    *   **Exact Representation**: The `new_string` must accurately represent the desired state of the code, including correct indentation, whitespace, and newlines.
-    *   **No Read Artifacts**: As with `old_string`, ensure `new_string` does *not* contain any `Read` tool output artifacts.
+# Using UV
+uv run claude-code-proxy
 
-4.  **Choosing the Right Editing Tool**:
-    *   **`Edit` Tool**: Suitable for a single, well-defined replacement in a file.
-    *   **`MultiEdit` Tool**: Preferred when multiple changes are needed within the same file. Edits are applied sequentially, with each subsequent edit operating on the result of the previous one. This tool is highly effective for complex modifications.
+# With hot reload for development
+uvicorn src.main:app --reload --host 0.0.0.0 --port 8082
 
-5.  **Verification**:
-    *   The success confirmation from the `Edit` or `MultiEdit` tool (especially if `expected_replacements` is used and matches) is the primary indicator that the change was made.
-    *   If further visual confirmation is needed, use the `Read` tool with `offset` and `limit` parameters to view only the specific section of the file that was changed, rather than re-reading the entire file.
+# Docker
+docker compose up -d
+docker compose -f docker-compose.dev.yml up --build  # With hot reload
+```
 
-### Reliable Code Insertion with MultiEdit
+### Testing
 
-When inserting larger blocks of new code (e.g., multiple functions or methods) where a simple `old_string` might be fragile due to surrounding code, the following `MultiEdit` strategy can be more robust:
+```bash
+# Run test suite
+pytest tests/
 
-1.  **First Edit - Targeted Insertion Point**: For the primary code block you want to insert (e.g., new methods within a class), identify a short, unique, and stable line of code immediately *after* your desired insertion point. Use this stable line as the `old_string`.
-    *   The `new_string` will consist of your new block of code, followed by a newline, and then the original `old_string` (the stable line you matched on).
-    *   Example: If inserting methods into a class, the `old_string` might be the closing brace `}` of the class, or a comment that directly follows the class.
+# Run specific test file
+pytest tests/test_main.py
 
-2.  **Second Edit (Optional) - Ancillary Code**: If there's another, smaller piece of related code to insert (e.g., a function call within an existing method, or an import statement), perform this as a separate, more straightforward edit within the `MultiEdit` call. This edit usually has a more clearly defined and less ambiguous `old_string`.
+# Test cancellation functionality
+python test_cancellation.py
 
-**Rationale**:
-*   By anchoring the main insertion on a very stable, unique line *after* the insertion point and prepending the new code to it, you reduce the risk of `old_string` mismatches caused by subtle variations in the code *before* the insertion point.
-*   Keeping ancillary edits separate allows them to succeed even if the main insertion point is complex, as they often target simpler, more reliable `old_string` patterns.
-*   This approach leverages `MultiEdit`'s sequential application of changes effectively.
+# Manual integration test
+python src/test_claude_to_openai.py
+```
 
-**Example Scenario**: Adding new methods to a class and a call to one of these new methods elsewhere.
-*   **Edit 1**: Insert the new methods. `old_string` is the class's closing brace `}`. `new_string` is `
-    [new methods code]
-    }`.
-*   **Edit 2**: Insert the call to a new method. `old_string` is `// existing line before call`. `new_string` is `// existing line before call
-    this.newMethodCall();`.
+### Code Quality
 
-This method provides a balance between precise editing and handling larger code insertions reliably when direct `old_string` matches for the entire new block are problematic.
+```bash
+# Format code
+uv run black src/
+uv run isort src/
 
-## Handling Large Files for Incremental Refactoring
+# Type checking
+uv run mypy src/
+```
 
-When refactoring large files incrementally rather than rewriting them completely:
+### Binary Packaging
 
-1. **Initial Exploration and Planning**:
-   * Begin with targeted searches using `Grep` to locate specific patterns or sections within the file.
-   * Use `Bash` commands like `grep -n "pattern" file` to find line numbers for specific areas of interest.
-   * Create a clear mental model of the file structure before proceeding with edits.
+```bash
+# Create standalone binary
+uv run pyinstaller --onefile --name claude-code-proxy-single src/main.py
 
-2. **Chunked Reading for Large Files**:
-   * For files too large to read at once, use multiple `Read` operations with different `offset` and `limit` parameters.
-   * Read sequential chunks to build a complete understanding of the file.
-   * Use `Grep` to pinpoint key sections, then read just those sections with targeted `offset` parameters.
+# Create directory version (for development)
+uv run pyinstaller claude-proxy.spec
+```
 
-3. **Finding Key Implementation Sections**:
-   * Use `Bash` commands with `grep -A N` (to show N lines after a match) or `grep -B N` (to show N lines before) to locate function or method implementations.
-   * Example: `grep -n "function findTagBoundaries" -A 20 filename.js` to see the first 20 lines of a function.
+## Architecture
 
-4. **Pattern-Based Replacement Strategy**:
-   * Identify common patterns that need to be replaced across the file.
-   * Use the `Bash` tool with `sed` for quick previews of potential replacements.
-   * Example: `sed -n "s/oldPattern/newPattern/gp" filename.js` to preview changes without making them.
+### Directory Structure
 
-5. **Sequential Selective Edits**:
-   * Target specific sections or patterns one at a time rather than attempting a complete rewrite.
-   * Focus on clearest/simplest cases first to establish a pattern of successful edits.
-   * Use `Edit` for well-defined single changes within the file.
+```
+src/
+├── main.py                 # FastAPI app entry point
+├── core/
+│   ├── config.py          # Configuration management (environment variables)
+│   ├── client.py          # HTTP client for provider APIs (with cancellation)
+│   ├── model_manager.py   # Model name mapping logic
+│   ├── logging.py         # Logging configuration
+│   └── constants.py       # Application constants
+├── api/
+│   └── endpoints.py       # FastAPI route handlers
+├── conversion/
+│   ├── request_converter.py   # Claude → OpenAI format conversion
+│   └── response_converter.py  # OpenAI → Claude format conversion
+└── models/
+    ├── claude.py          # Pydantic models for Claude API format
+    └── openai.py          # Pydantic models for OpenAI API format
+```
 
-6. **Batch Similar Changes Together**:
-   * Group similar types of changes (e.g., all references to a particular function or variable).
-   * Use `Bash` with `sed` to preview the scope of batch changes: `grep -n "pattern" filename.js | wc -l`
-   * For systematic changes across a file, consider using `sed` through the `Bash` tool: `sed -i "s/oldPattern/newPattern/g" filename.js`
+### Request Flow
 
-7. **Incremental Verification**:
-   * After each set of changes, verify the specific sections that were modified.
-   * For critical components, read the surrounding context to ensure the changes integrate correctly.
-   * Validate that each change maintains the file's structure and logic before proceeding to the next.
+```
+1. Claude Client sends request to /v1/messages (Claude format)
+   ↓
+2. src/api/endpoints.py validates API key
+   ↓
+3. src/conversion/request_converter.py converts to OpenAI format
+   ↓
+4. src/core/model_manager.py maps Claude model to provider model
+   ↓
+5. src/core/client.py forwards to provider API
+   ↓
+6. src/conversion/response_converter.py converts response back to Claude format
+   ↓
+7. Response sent to client (with SSE streaming if enabled)
+```
 
-8. **Progress Tracking for Large Refactors**:
-   * Use the `TodoWrite` tool to track which sections or patterns have been updated.
-   * Create a checklist of all required changes and mark them off as they're completed.
-   * Record any sections that require special attention or that couldn't be automatically refactored.
+### Key Components
 
-## Commit Messages
+**Configuration System** (`src/core/config.py`)
+- Loads all environment variables from `.env`
+- Validates required settings (OPENAI_API_KEY)
+- Supports client API key validation via ANTHROPIC_API_KEY
+- Custom headers via CUSTOM_HEADER_* variables
+- Model mapping configuration (BIG_MODEL, MIDDLE_MODEL, SMALL_MODEL)
 
-When Claude Code generates commit messages on your behalf:
-*   The `Co-Authored-By: Claude <noreply@anthropic.com>` line will **not** be included.
-*   The `🤖 Generated with [Claude Code](https://claude.ai/code)` line will **not** be included.
+**Model Mapping** (`src/core/model_manager.py`)
+- Claude model names are mapped to provider models based on patterns:
+  - Models containing "haiku" → `SMALL_MODEL` (default: gpt-4o-mini)
+  - Models containing "sonnet" → `MIDDLE_MODEL` (default: gpt-4o)
+  - Models containing "opus" → `BIG_MODEL` (default: gpt-4o)
 
-## General Interaction
+**HTTP Client** (`src/core/client.py`)
+- Async HTTP client for provider API communication
+- Supports request cancellation when client disconnects
+- Connection pooling and timeout management
+- Custom header injection
 
-Claude Code will directly apply proposed changes and modifications using the available tools, rather than describing them and asking you to implement them manually. This ensures a more efficient and direct workflow.
+**API Endpoints** (`src/api/endpoints.py`)
+- `POST /v1/messages` - Main chat completion endpoint
+- `POST /v1/messages/count_tokens` - Token counting
+- `GET /health` - Health check
+- `GET /test-connection` - Connection testing
+
+### Environment Variables
+
+**Required:**
+- `OPENAI_API_KEY` - API key for the target LLM provider
+
+**Authentication:**
+- `ANTHROPIC_API_KEY` - If set, validates client API keys (recommended for security)
+
+**Model Configuration:**
+- `BIG_MODEL` - Model for opus requests (default: gpt-4o)
+- `MIDDLE_MODEL` - Model for sonnet requests (default: BIG_MODEL value)
+- `SMALL_MODEL` - Model for haiku requests (default: gpt-4o-mini)
+
+**API Settings:**
+- `OPENAI_BASE_URL` - Provider API base URL (default: https://api.openai.com/v1)
+- `AZURE_API_VERSION` - Azure OpenAI API version
+- `REQUEST_TIMEOUT` - Request timeout in seconds (default: 90)
+- `MAX_RETRIES` - Maximum retry attempts (default: 2)
+
+**Server Configuration:**
+- `HOST` - Server host (default: 0.0.0.0)
+- `PORT` - Server port (default: 8082)
+- `LOG_LEVEL` - Logging level (default: INFO)
+
+**Provider-Specific:**
+- `API_PROVIDER` - "openai" or "lmp" for LMP platform
+- `LMP_API_VERSION` - "" for V1, "V2" for V2 streaming format (LMP only)
+
+**Tool Choice Configuration:**
+- `FORCE_TOOL_CHOICE` - When to auto-add tool_choice: "auto" (default), "none", "required"
+- `DEFAULT_TOOL_CHOICE` - Tool name to use when auto-generating tool_choice (empty = first tool)
+
+**Custom Headers:**
+- `CUSTOM_HEADER_*` - Custom HTTP headers (e.g., CUSTOM_HEADER_ACCEPT="application/json")
+
+### Design Patterns
+
+**Async/Await Throughout:**
+- All I/O operations use async/await for high concurrency
+- FastAPI's native async support
+- Async HTTP client in `src/core/client.py`
+
+**Pydantic for Validation:**
+- Request/response models in `src/models/`
+- Automatic validation and serialization
+- Type safety throughout
+
+**Separation of Concerns:**
+- Core: Configuration, client, model management
+- API: Route handlers only
+- Conversion: Format translation logic
+- Models: Data structures only
+
+**Error Handling:**
+- Comprehensive try/catch blocks
+- Graceful degradation
+- Detailed error messages
+- Request cleanup on cancellation
+
+### Provider Configuration Examples
+
+**OpenAI:**
+```bash
+OPENAI_API_KEY="sk-..."
+OPENAI_BASE_URL="https://api.openai.com/v1"
+```
+
+**Azure OpenAI:**
+```bash
+OPENAI_API_KEY="your-azure-key"
+OPENAI_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment"
+AZURE_API_VERSION="2024-02-01"
+```
+
+**Ollama (Local):**
+```bash
+OPENAI_API_KEY="dummy-key"
+OPENAI_BASE_URL="http://localhost:11434/v1"
+```
+
+**LMP Platform:**
+```bash
+API_PROVIDER="lmp"
+LMP_API_VERSION="V2"
+```
+
+## Important Implementation Details
+
+### Request Cancellation
+- When client disconnects, the proxy cancels the upstream provider request
+- Implemented in `src/core/client.py` using async cancellation tokens
+- Prevents resource waste on abandoned requests
+
+### Streaming Support
+- Uses Server-Sent Events (SSE) for streaming responses
+- Converter in `src/conversion/response_converter.py` handles chunked responses
+- Maintains compatibility with Claude's streaming format
+
+### Tool/Function Calling
+- Full support for Claude's tool use format
+- Converted to OpenAI's function calling format
+- Bidirectional conversion of tool results
+
+### Image Support
+- Base64 encoded images in messages
+- Converted to OpenAI's image URL format
+- Supports multimodal inputs
+
+### Custom Headers
+- Automatically injected from CUSTOM_HEADER_* environment variables
+- Applied to all upstream API requests
+- Useful for authentication, tracing, and provider-specific requirements
+
+### Tool Choice Auto-Injection
+- Some providers (like bailianLLM) require `tool_choice` field even when optional in OpenAI spec
+- When `tools` are present but `tool_choice` is missing, proxy can auto-add it based on `FORCE_TOOL_CHOICE` config
+- For providers requiring full object structure (like bailianLLM), automatically generates:
+  - Single tool: `tool_choice={type: "function", function: {name: "tool_name"}}`
+  - Multiple tools: `tool_choice={type: "function", function: {name: "first_tool_name"}}`
+- Set to "none" for strict OpenAI compatibility, or "required" for providers that mandate the field
+
+## Testing with Claude Code
+
+After starting the proxy:
+
+```bash
+# If ANTHROPIC_API_KEY is not set in proxy
+ANTHROPIC_BASE_URL=http://localhost:8082 ANTHROPIC_API_KEY="any-value" claude
+
+# If ANTHROPIC_API_KEY is set in proxy (must match)
+ANTHROPIC_BASE_URL=http://localhost:8082 ANTHROPIC_API_KEY="your-key" claude
+```
 
 ## Recent Changes
 

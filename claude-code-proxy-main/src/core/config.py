@@ -42,6 +42,18 @@ class Config:
 
         # Mock models endpoint
         self.mock_models = os.environ.get("MOCK_MODELS", "false").lower() == "true"
+
+        # Tool choice configuration
+        # Controls when to automatically add tool_choice field
+        # Options:
+        #   - "auto": Add complete tool_choice object when tools present but tool_choice missing (default, recommended)
+        #   - "none": Never add tool_choice (standard OpenAI behavior)
+        #   - "required": Always add tool_choice when tools present (for strict providers)
+        self.force_tool_choice = os.environ.get("FORCE_TOOL_CHOICE", "auto").lower()
+
+        # Default tool name when auto-generating tool_choice with multiple tools
+        # Empty string selects the first tool automatically
+        self.default_tool_choice = os.environ.get("DEFAULT_TOOL_CHOICE", "")
         
     def validate_api_key(self):
         """Basic API key validation"""
@@ -93,8 +105,17 @@ class Config:
             return f"{base_path}/V2"
         return base_path
 
+    def validate_tool_choice_config(self):
+        """Validate tool choice configuration."""
+        valid_modes = ["auto", "none", "required"]
+        if self.force_tool_choice not in valid_modes:
+            print(f"Warning: Invalid FORCE_TOOL_CHOICE '{self.force_tool_choice}'. Defaulting to 'auto'.")
+            self.force_tool_choice = "auto"
+        return self.force_tool_choice
+
 try:
     config = Config()
+    config.validate_tool_choice_config()
     print(f" Configuration loaded: API_KEY={'*' * 20}..., BASE_URL='{config.openai_base_url}'")
 except Exception as e:
     print(f"=4 Configuration Error: {e}")

@@ -113,6 +113,7 @@ def convert_claude_to_openai(
 
     # Convert tool choice
     if claude_request.tool_choice:
+        # User explicitly specified tool_choice - respect their choice
         choice_type = claude_request.tool_choice.get("type")
         if choice_type == "auto":
             openai_request["tool_choice"] = "auto"
@@ -125,6 +126,58 @@ def convert_claude_to_openai(
             }
         else:
             openai_request["tool_choice"] = "auto"
+    elif openai_request.get("tools"):
+        # No tool_choice specified, but tools are present
+        # Check if we should add default tool_choice based on configuration
+        force_mode = config.force_tool_choice
+
+        if force_mode == "none":
+            # Don't add tool_choice (standard OpenAI behavior)
+            pass
+        elif force_mode == "required":
+            # Always add tool_choice when tools present
+            # Use "auto" to let model decide, or first tool if specific
+            default_choice = config.default_tool_choice
+            if default_choice == "auto":
+                openai_request["tool_choice"] = "auto"
+            elif default_choice == "none":
+                openai_request["tool_choice"] = "none"
+            else:
+                # Treat as specific tool name
+                openai_request["tool_choice"] = {
+                    "type": Constants.TOOL_FUNCTION,
+                    Constants.TOOL_FUNCTION: {"name": default_choice},
+                }
+        else:  # force_mode == "auto" (default)
+            # Add complete tool_choice object when tools present but tool_choice missing
+            # For providers like bailianLLM that require the full object structure
+            if openai_tools and len(openai_tools) == 1:
+                # Only one tool - automatically select it
+                tool_name = openai_tools[0][Constants.TOOL_FUNCTION]["name"]
+                openai_request["tool_choice"] = {
+                    "type": Constants.TOOL_FUNCTION,
+                    Constants.TOOL_FUNCTION: {"name": tool_name},
+                }
+                logger.debug(
+                    f"Automatically added tool_choice={{type: function, function: {{name: {tool_name}}}}} for single tool"
+                )
+            elif openai_tools and len(openai_tools) > 1:
+                # Multiple tools - select the first one by default
+                # Or use DEFAULT_TOOL_CHOICE if it's a specific tool name
+                default_choice = config.default_tool_choice
+                if default_choice == "auto" or default_choice not in [t[Constants.TOOL_FUNCTION]["name"] for t in openai_tools]:
+                    # Select first tool
+                    tool_name = openai_tools[0][Constants.TOOL_FUNCTION]["name"]
+                else:
+                    # Use configured tool name
+                    tool_name = default_choice
+                openai_request["tool_choice"] = {
+                    "type": Constants.TOOL_FUNCTION,
+                    Constants.TOOL_FUNCTION: {"name": tool_name},
+                }
+                logger.debug(
+                    f"Automatically added tool_choice={{type: function, function: {{name: {tool_name}}}}} for multiple tools"
+                )
 
     return openai_request
 
